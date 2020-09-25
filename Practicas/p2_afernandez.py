@@ -1,81 +1,82 @@
 #!/usr/bin/python3
-import binascii
+"""Abisinia Fernandez Martinez, programa que crea particiones bàsicas en Linux"""
 import struct
+import binascii
+import os
 
-def imprimeBuff(f):
-    total=4*16+2
-    buffer= f.read(total)
-    f.seek(446)
-    cont=0
-    for i in buffer:
-        tmp=format(i,'02x')
-        cont=cont+1
-        if(cont==16):
-            cont=0
-def definirTipo(tipo):
-    tipo=int(tipo)
-    if tipo == 1:
-        res='07'
-    elif tipo == 3 :
-        res='82'
-    elif tipo == 4 :
-        res='86'
-    elif tipo == 5 :
-        res='a5'
-    else:
-        res='83'
+
+def checkPartition(device):
+    poss={'1':450, '2':466, '3':482, '4':498}
+    free=[]
+    for item in poss:
+        device.seek(poss[item])
+        byte=device.read(1)
+        if byte == b'\x00':
+            free.append(item)
+    while (True):
+        if len(free) >0:
+            print("Available partition ID(s):")
+            for item in free:
+                print("\t"+item)
+            partition=str(input("ID: "))
+            if partition in free:
+                position=poss[partition]
+                device.seek(position)
+                byte=device.read(1)
+                if byte == b'\x00':
+                    return partition 
+                else:
+                    print("Written Partition. Try another one.")
+            else:
+                print("No valid option. Please try it again")
+        else:
+            return 0 
+
+def getType():
+    tipos={'a':'83', 'b':'82', 'c':'86', 'd':'a5', 'e':'bf'}
+    while(True):
+        print ("Available types:\n\t a) Linux \n\t b) Linux Swap \n\t c) NTFS\n\t d) FreeBSD \n\t e) Solaris");
+        tipo=str(input("Partition type: "))
+        if tipo in tipos:
+            break
+        else:
+            print("No valid option, try another one.")
+    return tipos[tipo]
+
+def getLong():
+    unit={'K':1024/512,'M':1024**2/512,'G':1024**3/512}
+    lon=str(input("Tamaño:"))
+    key=lon[len(lon)-1:]
+    while(True):
+        if key in unit:
+            res= int(lon[:-1])*(unit[key])
+            break
+        else:
+            print("No valid option, try something like 500K, 200M or 1G")
     return res
 
-def checkpart(f):
-    poss=[450, 466, 482, 498]
-    while (1):
-        idpart=int(input("Introduce el Id de particion(1-4): "))
-        if idpart in [1,2,3,4]:
-            posicion=poss[idpart-1]
-            f.seek(posicion)
-            val=f.read(1)
-            if val == b'\x00':
-                break    
+disk=str(input("Disk: "))
+path="/dev/"+disk
+with open(path,'wb+') as device:
+    p=checkPartition(device)
+    if(p!=0):
+        device.seek(446+16*(int(p)-1))
+        tipo=getType()
+        size=getLong()
+        values={1:'20', 4:tipo}
+        for value in range(0,12,1):
+            if value in values:
+                item=binascii.unhexlify(values[value])
             else:
-                print("Particiòn ya escrita")
-        else:
-            print("Particion no vàlida")
-    return idpart
-def getLong():
-    longitud=input("Ingresa el tamaño (EX: 500K, 100M o 1G)")
-    if("M" in longitud):
-        mult=int(longitud[:-1])*(1024**2)
-    elif("G" in longitud):
-        mult=int(longitud[:-1])*(1024**3)
+                item=binascii.unhexlify('00')
+            device.write(item)
+        binario=struct.pack('<I',int(size))
+        for item in binario:
+            device.write(bytes([item]))
+        device.seek(510)
+        device.write(binascii.unhexlify(str('55')))
+        device.write(binascii.unhexlify(str('aa')))
     else:
-        mult=int(longitud[:-1])*(1024)
-    mult=mult/512
-    return mult
-
-disco=input("Introduce el disco a particionar: ")
-path="/dev/"
-path=path+disco
-default='20'
-with open(path,'wb+') as f:
-    particion=checkpart(f)
-    pos=446+16*(particion-1) #Poscion del priemr byte de x particion
-    print ("Tipos aceptados:\n 1) HPFS/NTFS/exFAT\n 2) Linux \n 3) Linux Swap \n 4) NTFS \n 5) FreeBSD");
-    tipo=input("Introduce el tipo de particion(1-5): ")
-    tipo=definirTipo(tipo)
-    mult=getLong()
-    f.seek(pos)
-    values=['00', '20', '00', '00', tipo, '00', '00', '00', '00', '00', '00', '00']
-    for byte in values:
-        item=binascii.unhexlify(str(byte))
-        f.write(item)
-    mult=struct.pack('<I',int(mult))
-    f.write(bytes([mult[0]]))
-    f.write(bytes([mult[1]]))
-    f.write(bytes([mult[2]]))
-    f.write(bytes([mult[3]]))
-    f.seek(510,0)
-    f.write(binascii.unhexlify(str('55')))
-    f.write(binascii.unhexlify(str('aa')))
-
-print("")
-f.close()
+        print("Not available partitions.")
+device.close()
+os.system('sudo fdisk -l '+path)
